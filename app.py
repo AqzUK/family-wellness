@@ -624,4 +624,3 @@ elif page == "🍽️ Weekly Meal Plan":
 
     **This one Sunday session saves you cooking every single day.**
     """)
-
