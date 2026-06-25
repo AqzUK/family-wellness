@@ -1,0 +1,365 @@
+import streamlit as st
+import json
+import os
+from datetime import date
+from utils.prayer_times import get_prayer_times, get_sleep_instruction
+from utils.data_store import load_profiles, save_profiles, load_logs, save_log
+from utils.islamic_quotes import get_daily_quote
+
+st.set_page_config(
+    page_title="Family Wellness — Peak Health",
+    page_icon="🌙",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
+# ── CSS ────────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+  .main-title { font-size: 26px; font-weight: 600; margin-bottom: 4px; }
+  .sub-title  { font-size: 14px; color: #888; margin-bottom: 1.5rem; }
+  .quran-card {
+    background: linear-gradient(135deg, #1a472a 0%, #2d6a4f 100%);
+    border-radius: 12px; padding: 1.2rem 1.4rem; margin-bottom: 1.5rem; color: white;
+  }
+  .quran-text  { font-size: 15px; font-style: italic; margin-bottom: 6px; }
+  .quran-ref   { font-size: 12px; opacity: 0.75; }
+  .prayer-row  {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid #f0f0f0; font-size: 14px;
+  }
+  .prayer-name { font-weight: 500; }
+  .prayer-time { color: #2d6a4f; font-weight: 600; }
+  .sleep-box {
+    background: #eaf3f8; border-left: 4px solid #1a6fa0;
+    border-radius: 6px; padding: 0.8rem 1rem; margin-top: 1rem;
+    font-size: 14px; color: #1a4f6e;
+  }
+  .metric-card {
+    background: #f8f8f8; border-radius: 10px;
+    padding: 0.9rem 1rem; text-align: center;
+  }
+  .metric-val  { font-size: 24px; font-weight: 600; color: #1a472a; }
+  .metric-lab  { font-size: 12px; color: #888; margin-top: 2px; }
+  .streak-fire { font-size: 32px; }
+  .gym-card {
+    background: #fff8f0; border-left: 4px solid #e07b39;
+    border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1rem;
+  }
+  .gym-title   { font-weight: 600; font-size: 15px; color: #b85c1a; margin-bottom: 8px; }
+  .gym-item    { font-size: 13px; padding: 3px 0; color: #333; }
+  .hungry-card {
+    background: #f0f7f0; border-left: 4px solid #2d6a4f;
+    border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 0.8rem;
+  }
+  .hungry-title { font-weight: 600; font-size: 15px; color: #1a472a; margin-bottom: 6px; }
+  .hungry-item  { font-size: 13px; color: #333; padding: 2px 0; }
+  .aldi-section { margin-bottom: 0.5rem; }
+  .aldi-header  { font-weight: 600; font-size: 14px; color: #e07b39; margin: 0.8rem 0 4px; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── SESSION STATE ──────────────────────────────────────────────────────────────
+if "active_profile" not in st.session_state:
+    st.session_state.active_profile = None
+if "profiles" not in st.session_state:
+    st.session_state.profiles = load_profiles()
+
+# ── SIDEBAR ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("### 🌙 Peak Family Wellness")
+    st.markdown("---")
+
+    profiles = st.session_state.profiles
+    if profiles:
+        names = [p["name"] for p in profiles]
+        choice = st.radio("Who are you?", names)
+        st.session_state.active_profile = next(p for p in profiles if p["name"] == choice)
+        st.markdown("---")
+
+    st.markdown("**Navigation**")
+    page = st.radio(
+        "Go to",
+        ["🏠 Daily Dashboard", "⚖️ Log Weight", "🏋️ Gym Plan",
+         "🥗 I'm Hungry", "🛒 Shopping List", "📈 My Progress", "👤 Profiles"],
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    st.caption("Built for the Zahid family · St Albans")
+
+# ── PROFILE SETUP ─────────────────────────────────────────────────────────────
+if page == "👤 Profiles":
+    st.markdown('<div class="main-title">👤 Family Profiles</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Set up or update each person\'s details</div>', unsafe_allow_html=True)
+
+    profiles = st.session_state.profiles
+    existing_names = [p["name"] for p in profiles]
+
+    with st.expander("➕ Add or update a profile", expanded=len(profiles) == 0):
+        pname  = st.selectbox("Name", ["Aquib", "Yousaf", "Mariam"])
+        height = st.text_input("Height (e.g. 5ft 11)")
+        weight = st.number_input("Current weight (stone)", min_value=6.0, max_value=30.0, step=0.1)
+        target = st.number_input("Target weight (stone)", min_value=6.0, max_value=30.0, step=0.1)
+        age    = st.number_input("Age", min_value=10, max_value=80, step=1)
+        goal   = st.selectbox("Primary goal", ["Weight loss + strength", "Gradual weight loss (teen)", "Tone + general health"])
+
+        if st.button("Save profile"):
+            new_p = {"name": pname, "height": height, "weight": weight,
+                     "target": target, "age": int(age), "goal": goal,
+                     "start_weight": weight}
+            profiles = [p for p in profiles if p["name"] != pname]
+            profiles.append(new_p)
+            st.session_state.profiles = profiles
+            save_profiles(profiles)
+            st.success(f"Profile saved for {pname}!")
+            st.rerun()
+
+    if profiles:
+        st.markdown("### Current profiles")
+        for p in profiles:
+            lost = round(p["start_weight"] - p["weight"], 1)
+            to_go = round(p["weight"] - p["target"], 1)
+            cols = st.columns(4)
+            cols[0].metric("Name", p["name"])
+            cols[1].metric("Current", f"{p['weight']} st")
+            cols[2].metric("Lost so far", f"{lost} st")
+            cols[3].metric("To go", f"{to_go} st")
+            st.markdown("---")
+
+# ── DAILY DASHBOARD ───────────────────────────────────────────────────────────
+elif page == "🏠 Daily Dashboard":
+    profile = st.session_state.active_profile
+    if not profile:
+        st.warning("Please set up your profile first using the Profiles page.")
+        st.stop()
+
+    name = profile["name"]
+    today = date.today()
+
+    st.markdown(f'<div class="main-title">Assalamu Alaikum, {name} 🌙</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-title">{today.strftime("%A, %d %B %Y")}</div>', unsafe_allow_html=True)
+
+    # Islamic quote
+    quote = get_daily_quote()
+    st.markdown(f"""
+    <div class="quran-card">
+      <div class="quran-text">"{quote['text']}"</div>
+      <div class="quran-ref">— {quote['reference']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Prayer times
+    st.markdown("### 🕌 Today's Prayer Times")
+    prayers = get_prayer_times()
+    if prayers:
+        prayer_names = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]
+        cols = st.columns(5)
+        for i, pname_p in enumerate(prayer_names):
+            cols[i].metric(pname_p, prayers.get(pname_p, "—"))
+
+        sleep_info = get_sleep_instruction(prayers)
+        st.markdown(f'<div class="sleep-box">🛏️ <strong>Tonight:</strong> {sleep_info}</div>', unsafe_allow_html=True)
+    else:
+        st.warning("Could not load prayer times. Check your internet connection.")
+
+    st.markdown("---")
+
+    # Daily check-in
+    st.markdown("### ✅ Daily Check-In")
+    logs = load_logs(name)
+    today_str = today.isoformat()
+    already_logged = any(l["date"] == today_str for l in logs)
+
+    if already_logged:
+        st.success("You've completed today's check-in. Barakallahu feek! 🌿")
+    else:
+        with st.form("checkin_form"):
+            w       = st.number_input("Weight this morning (stone)", min_value=6.0, max_value=30.0, step=0.1, value=float(profile["weight"]))
+            sleep_h = st.slider("Hours of sleep last night", 0, 12, 7)
+            prayers_done = st.multiselect("Prayers completed today", ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"])
+            ate_late = st.radio("Did you eat after 8:30pm last night?", ["No ✅", "Yes ❌"])
+            trained  = st.radio("Did you train / exercise today?", ["Yes 💪", "No", "Rest day"])
+            sugar    = st.select_slider("Sugar intake today", options=["None ✅", "1–2 items", "Too much ❌"])
+            energy   = st.slider("Energy level today (1–10)", 1, 10, 7)
+
+            submitted = st.form_submit_button("Submit check-in")
+            if submitted:
+                log_entry = {
+                    "date": today_str, "weight": w, "sleep": sleep_h,
+                    "prayers": prayers_done, "ate_late": ate_late,
+                    "trained": trained, "sugar": sugar, "energy": energy
+                }
+                save_log(name, log_entry)
+                # Update profile weight
+                profile["weight"] = w
+                profiles = st.session_state.profiles
+                profiles = [p if p["name"] != name else profile for p in profiles]
+                st.session_state.profiles = profiles
+                save_profiles(profiles)
+                st.success("Check-in saved! May Allah bless your efforts. 🌿")
+                st.rerun()
+
+    # Streak
+    st.markdown("---")
+    streak = 0
+    for l in sorted(logs, key=lambda x: x["date"], reverse=True):
+        if l.get("ate_late") == "No ✅" and l.get("sleep", 0) >= 6:
+            streak += 1
+        else:
+            break
+    cols = st.columns(3)
+    cols[0].markdown(f'<div class="metric-card"><div class="metric-val">{streak}</div><div class="metric-lab">Day streak 🔥</div></div>', unsafe_allow_html=True)
+    lost = round(profile["start_weight"] - profile["weight"], 1)
+    cols[1].markdown(f'<div class="metric-card"><div class="metric-val">{lost} st</div><div class="metric-lab">Lost so far</div></div>', unsafe_allow_html=True)
+    to_go = round(profile["weight"] - profile["target"], 1)
+    cols[2].markdown(f'<div class="metric-card"><div class="metric-val">{to_go} st</div><div class="metric-lab">To go</div></div>', unsafe_allow_html=True)
+
+# ── GYM PLAN ──────────────────────────────────────────────────────────────────
+elif page == "🏋️ Gym Plan":
+    from utils.gym_plans import get_todays_gym_plan
+    profile = st.session_state.active_profile
+    if not profile:
+        st.warning("Please set up your profile first.")
+        st.stop()
+
+    st.markdown('<div class="main-title">🏋️ Today\'s Gym Plan</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Your personalised session for today</div>', unsafe_allow_html=True)
+
+    quote = get_daily_quote("gym")
+    st.markdown(f"""
+    <div class="quran-card">
+      <div class="quran-text">"{quote['text']}"</div>
+      <div class="quran-ref">— {quote['reference']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    plan = get_todays_gym_plan(profile)
+    st.markdown(f"### {plan['day_name']}")
+    st.caption(plan["focus"])
+
+    for block in plan["blocks"]:
+        st.markdown(f'<div class="gym-card"><div class="gym-title">{block["name"]}</div>', unsafe_allow_html=True)
+        for ex in block["exercises"]:
+            st.markdown(f'<div class="gym-item">• {ex}</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    if plan.get("cardio"):
+        st.info(f"🚶 Cardio: {plan['cardio']}")
+    if plan.get("rest_note"):
+        st.success(plan["rest_note"])
+
+    st.markdown("---")
+    st.markdown("**⚠️ Always warm up 5 minutes before lifting. Form over weight every time.**")
+
+# ── HUNGRY ────────────────────────────────────────────────────────────────────
+elif page == "🥗 I'm Hungry":
+    from utils.meal_plans import get_meal_suggestion
+    profile = st.session_state.active_profile
+    if not profile:
+        st.warning("Please set up your profile first.")
+        st.stop()
+
+    st.markdown('<div class="main-title">🥗 What Should I Eat?</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Halal · Cheap · Fulfilling · Right now</div>', unsafe_allow_html=True)
+
+    from datetime import datetime
+    hour = datetime.now().hour
+    if hour < 10:
+        meal_time = "breakfast"
+    elif hour < 14:
+        meal_time = "lunch"
+    elif hour < 18:
+        meal_time = "afternoon"
+    elif hour < 21:
+        meal_time = "dinner"
+    else:
+        meal_time = "late"
+
+    st.markdown(f"**Suggested for:** {meal_time.title()}")
+
+    meals = get_meal_suggestion(profile, meal_time)
+    for meal in meals:
+        st.markdown(f"""
+        <div class="hungry-card">
+          <div class="hungry-title">{meal['name']}</div>
+          <div class="hungry-item">⏱ {meal['time']} · 💰 Est. {meal['cost']}</div>
+          <div class="hungry-item" style="margin-top:6px"><strong>Ingredients:</strong> {meal['ingredients']}</div>
+          <div class="hungry-item" style="margin-top:4px"><strong>How to make it:</strong> {meal['method']}</div>
+          <div class="hungry-item" style="margin-top:4px; color:#888">~{meal['calories']} kcal · {meal['protein']}g protein</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    if meal_time == "late":
+        st.error("⛔ It is past 8:30pm. The kitchen is closed. Drink water or herbal tea. Sleep is more important than food right now.")
+
+# ── SHOPPING LIST ─────────────────────────────────────────────────────────────
+elif page == "🛒 Shopping List":
+    from utils.shopping import get_weekly_shopping_list
+    st.markdown('<div class="main-title">🛒 Weekly Aldi Shopping List</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">For the whole family · Est. under £60 · Halal</div>', unsafe_allow_html=True)
+
+    shopping = get_weekly_shopping_list()
+    total_est = 0
+    for category, items in shopping.items():
+        st.markdown(f'<div class="aldi-header">{category}</div>', unsafe_allow_html=True)
+        for item in items:
+            col1, col2, col3 = st.columns([0.5, 3, 1])
+            col1.checkbox("", key=f"shop_{category}_{item['name']}")
+            col2.markdown(f"<span style='font-size:13px'>{item['name']}</span>", unsafe_allow_html=True)
+            col3.markdown(f"<span style='font-size:12px; color:#888'>{item['qty']}</span>", unsafe_allow_html=True)
+            total_est += item.get("price", 0)
+
+    st.markdown("---")
+    st.metric("Estimated total", f"£{total_est:.2f}")
+    st.caption("Prices based on Aldi UK typical costs. Halal meat from halal butcher or Aldi halal range.")
+
+# ── PROGRESS ──────────────────────────────────────────────────────────────────
+elif page == "📈 My Progress":
+    import pandas as pd
+    profile = st.session_state.active_profile
+    if not profile:
+        st.warning("Please set up your profile first.")
+        st.stop()
+
+    name = profile["name"]
+    logs = load_logs(name)
+
+    st.markdown(f'<div class="main-title">📈 {name}\'s Progress</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Your journey so far</div>', unsafe_allow_html=True)
+
+    if not logs:
+        st.info("No data yet. Complete your first daily check-in on the Dashboard.")
+        st.stop()
+
+    df = pd.DataFrame(logs)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+
+    col1, col2, col3 = st.columns(3)
+    start_w = profile["start_weight"]
+    current_w = df["weight"].iloc[-1]
+    lost = round(start_w - current_w, 1)
+    to_go = round(current_w - profile["target"], 1)
+    col1.metric("Started at", f"{start_w} st")
+    col2.metric("Lost", f"{lost} st", delta=f"-{lost} st")
+    col3.metric("Still to go", f"{to_go} st")
+
+    st.markdown("### Weight over time")
+    chart_df = df[["date", "weight"]].set_index("date")
+    st.line_chart(chart_df)
+
+    st.markdown("### Sleep over time")
+    if "sleep" in df.columns:
+        sleep_df = df[["date", "sleep"]].set_index("date")
+        st.line_chart(sleep_df)
+
+    st.markdown("### Energy over time")
+    if "energy" in df.columns:
+        energy_df = df[["date", "energy"]].set_index("date")
+        st.line_chart(energy_df)
+
+    st.markdown("---")
+    st.markdown("### Check-in history")
+    display_cols = ["date", "weight", "sleep", "energy", "trained", "sugar"]
+    available = [c for c in display_cols if c in df.columns]
+    st.dataframe(df[available].sort_values("date", ascending=False), use_container_width=True)
