@@ -463,11 +463,19 @@ elif page == "🍽️ Weekly Meal Plan":
             # ── DAILY TOTAL ──
             daily_cals = breakfast['calories'] + lunch['at_home']['calories'] + snack['calories'] + dinner['calories']
             daily_protein = breakfast['protein'] + lunch['at_home']['protein'] + snack['protein'] + dinner['protein']
+            def parse_cost(cost_str):
+                # Handle ranges like £4-6, text like 'per portion', etc.
+                import re
+                nums = re.findall(r'[0-9]+\.?[0-9]*', cost_str)
+                if not nums:
+                    return 0.0
+                return float(nums[0])
+
             daily_cost = (
-                float(breakfast['cost'].replace('~£','')) +
-                float(lunch['at_home']['cost'].replace('~£','')) +
-                float(snack['cost'].replace('~£','')) +
-                float(dinner['cost'].replace('~£',''))
+                parse_cost(breakfast['cost']) +
+                parse_cost(lunch['at_home']['cost']) +
+                parse_cost(snack['cost']) +
+                parse_cost(dinner['cost'])
             )
 
             st.markdown("---")
