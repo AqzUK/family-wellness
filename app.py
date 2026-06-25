@@ -81,7 +81,8 @@ with st.sidebar:
     page = st.radio(
         "Go to",
         ["🏠 Daily Dashboard", "⚖️ Log Weight", "🏋️ Gym Plan",
-         "🥗 I'm Hungry", "🛒 Shopping List", "📈 My Progress", "👤 Profiles"],
+         "🍽️ Weekly Meal Plan", "🥗 I'm Hungry", "🛒 Shopping List",
+         "📈 My Progress", "👤 Profiles"],
         label_visibility="collapsed"
     )
     st.markdown("---")
@@ -96,7 +97,7 @@ if page == "👤 Profiles":
     existing_names = [p["name"] for p in profiles]
 
     with st.expander("➕ Add or update a profile", expanded=len(profiles) == 0):
-        pname  = st.selectbox("Name", ["Aquib", "Yousaf", "Mariam"])
+        pname  = st.selectbox("Name", ["Aquib", "Yousaf", "Mariam", "Anwar"])
         height = st.text_input("Height (e.g. 5ft 11)")
         weight = st.number_input("Current weight (stone)", min_value=6.0, max_value=30.0, step=0.1)
         target = st.number_input("Target weight (stone)", min_value=6.0, max_value=30.0, step=0.1)
@@ -363,3 +364,128 @@ elif page == "📈 My Progress":
     display_cols = ["date", "weight", "sleep", "energy", "trained", "sugar"]
     available = [c for c in display_cols if c in df.columns]
     st.dataframe(df[available].sort_values("date", ascending=False), use_container_width=True)
+
+# ── WEEKLY MEAL PLAN ──────────────────────────────────────────────────────────
+elif page == "🍽️ Weekly Meal Plan":
+    from utils.meal_plans import (
+        BREAKFASTS, LUNCHES, DINNERS, SNACKS, get_calorie_target
+    )
+
+    profile = st.session_state.active_profile
+    if not profile:
+        st.warning("Please set up your profile first.")
+        st.stop()
+
+    name = profile["name"]
+    target = get_calorie_target(profile)
+
+    st.markdown(f'<div class="main-title">🍽️ {name}\'s Weekly Meal Plan</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-title">Every meal from your Aldi weekly shop · {target["target"]} kcal daily target</div>', unsafe_allow_html=True)
+
+    st.info(f"📊 **Your daily target:** {target['target']} kcal · {target['note']}")
+
+    # Lunch note for those eating out
+    if name in ["Aquib", "Mariam"]:
+        st.warning("🏢 You are out for lunch — each lunch day shows both a meal prep option and an out option.")
+
+    DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    for i, day in enumerate(DAYS):
+        breakfast = BREAKFASTS[i % 7]
+        lunch     = LUNCHES[i % 7]
+        dinner    = DINNERS[i % 7]
+        snack     = SNACKS[i % len(SNACKS)]
+
+        with st.expander(f"📅 {day}", expanded=(i == 0)):
+
+            # ── BREAKFAST ──
+            st.markdown("#### 🌅 Breakfast")
+            st.markdown(f"""
+            <div class="hungry-card">
+              <div class="hungry-title">{breakfast['name']}</div>
+              <div class="hungry-item">⏱ {breakfast['time']} · 💰 {breakfast['cost']} · ~{breakfast['calories']} kcal · {breakfast['protein']}g protein</div>
+              <div class="hungry-item" style="margin-top:6px"><strong>Ingredients:</strong> {breakfast['ingredients']}</div>
+              <div class="hungry-item" style="margin-top:4px"><strong>Method:</strong> {breakfast['method']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── LUNCH ──
+            st.markdown("#### ☀️ Lunch")
+
+            # At home option
+            st.markdown(f"""
+            <div class="hungry-card">
+              <div class="hungry-title">🏠 At home / meal prep — {lunch['name']}</div>
+              <div class="hungry-item">⏱ {lunch['at_home']['prep']} · 💰 {lunch['at_home']['cost']} · ~{lunch['at_home']['calories']} kcal · {lunch['at_home']['protein']}g protein</div>
+              <div class="hungry-item" style="margin-top:6px">{lunch['at_home']['instructions']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Out option
+            st.markdown(f"""
+            <div class="gym-card">
+              <div class="gym-title">🏢 If you are out — {lunch['name']}</div>
+              <div class="gym-item">💰 {lunch['out']['cost']} · ~{lunch['out']['calories']} kcal · {lunch['out']['protein']}g protein</div>
+              <div class="gym-item" style="margin-top:6px">{lunch['out']['instructions']}</div>
+              <div class="gym-item" style="margin-top:4px; color:#888"><strong>Alternative:</strong> {lunch['out']['alternatives']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── SNACK ──
+            st.markdown("#### 🍎 Afternoon Snack")
+            st.markdown(f"""
+            <div class="hungry-card">
+              <div class="hungry-title">{snack['name']}</div>
+              <div class="hungry-item">⏱ {snack['time']} · 💰 {snack['cost']} · ~{snack['calories']} kcal · {snack['protein']}g protein</div>
+              <div class="hungry-item" style="margin-top:4px">{snack['method']}</div>
+              <div class="hungry-item" style="margin-top:4px; color:#888"><strong>If out:</strong> {snack.get('out', 'Bring from home in a small container.')}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── DINNER ──
+            st.markdown("#### 🌙 Dinner")
+
+            dinner_method = dinner['method']
+            if name == "Mariam":
+                dinner_method += " — Reduce portion by roughly a quarter."
+            if name == "Yousaf":
+                dinner_method += " — Add an extra egg or portion of rice to hit your calorie target."
+
+            st.markdown(f"""
+            <div class="hungry-card">
+              <div class="hungry-title">{dinner['name']}</div>
+              <div class="hungry-item">⏱ {dinner['time']} · 💰 {dinner['cost']} · ~{dinner['calories']} kcal · {dinner['protein']}g protein</div>
+              <div class="hungry-item" style="margin-top:6px"><strong>Ingredients:</strong> {dinner['ingredients']}</div>
+              <div class="hungry-item" style="margin-top:4px"><strong>Method:</strong> {dinner_method}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # ── DAILY TOTAL ──
+            daily_cals = breakfast['calories'] + lunch['at_home']['calories'] + snack['calories'] + dinner['calories']
+            daily_protein = breakfast['protein'] + lunch['at_home']['protein'] + snack['protein'] + dinner['protein']
+            daily_cost = (
+                float(breakfast['cost'].replace('~£','')) +
+                float(lunch['at_home']['cost'].replace('~£','')) +
+                float(snack['cost'].replace('~£','')) +
+                float(dinner['cost'].replace('~£',''))
+            )
+
+            st.markdown("---")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Day total", f"~{daily_cals} kcal",
+                        delta=f"{daily_cals - target['target']:+} vs target")
+            col2.metric("Protein", f"~{daily_protein}g")
+            col3.metric("Food cost", f"~£{daily_cost:.2f}")
+
+    st.markdown("---")
+    st.markdown("### 📋 Meal prep tips")
+    st.markdown("""
+    **Sunday evening (30 min) — prep these for the whole week:**
+    - Boil 6 eggs — grab 2 any time as a snack or breakfast
+    - Cook a big pot of lentil soup — 4 lunch portions ready
+    - Roast a tray of chicken thighs — use through the week cold in wraps or hot for dinner
+    - Cook a batch of brown rice — base for 3 dinners
+    - Portion Greek yogurt into small containers for grab-and-go breakfasts
+
+    **This one Sunday session saves you cooking every single day.**
+    """)
