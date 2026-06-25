@@ -120,11 +120,17 @@ if page == "👤 Profiles":
         for p in profiles:
             lost = round(p["start_weight"] - p["weight"], 1)
             to_go = round(p["weight"] - p["target"], 1)
-            cols = st.columns(4)
+            cols = st.columns(5)
             cols[0].metric("Name", p["name"])
             cols[1].metric("Current", f"{p['weight']} st")
-            cols[2].metric("Lost so far", f"{lost} st")
+            cols[2].metric("Lost", f"{lost} st")
             cols[3].metric("To go", f"{to_go} st")
+            if cols[4].button("🗑️ Delete", key=f"del_{p['name']}"):
+                profiles = [x for x in profiles if x["name"] != p["name"]]
+                st.session_state.profiles = profiles
+                save_profiles(profiles)
+                st.success(f"{p['name']}'s profile deleted.")
+                st.rerun()
             st.markdown("---")
 
 # ── DAILY DASHBOARD ───────────────────────────────────────────────────────────
@@ -214,6 +220,80 @@ elif page == "🏠 Daily Dashboard":
     cols[1].markdown(f'<div class="metric-card"><div class="metric-val">{lost} st</div><div class="metric-lab">Lost so far</div></div>', unsafe_allow_html=True)
     to_go = round(profile["weight"] - profile["target"], 1)
     cols[2].markdown(f'<div class="metric-card"><div class="metric-val">{to_go} st</div><div class="metric-lab">To go</div></div>', unsafe_allow_html=True)
+
+
+# ── LOG WEIGHT ────────────────────────────────────────────────────────────────
+elif page == "⚖️ Log Weight":
+    from utils.data_store import load_logs, save_log
+    import pandas as pd
+
+    profile = st.session_state.active_profile
+    if not profile:
+        st.warning("Please set up your profile first.")
+        st.stop()
+
+    name = profile["name"]
+    today = date.today()
+    today_str = today.isoformat()
+
+    st.markdown(f'<div class="main-title">⚖️ Log Your Weight</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-title">{today.strftime("%A, %d %B %Y")} · {name}</div>', unsafe_allow_html=True)
+
+    logs = load_logs(name)
+    already_logged = next((l for l in logs if l.get("date") == today_str), None)
+
+    if already_logged:
+        st.success(f"Today's weight already logged: **{already_logged['weight']} stone**")
+        st.info("You can update it below if you weighed yourself again.")
+
+    with st.form("weight_log_form"):
+        w = st.number_input(
+            "Your weight this morning (stone)",
+            min_value=6.0, max_value=30.0, step=0.1,
+            value=float(already_logged["weight"]) if already_logged else float(profile["weight"])
+        )
+        note = st.text_input("Optional note (e.g. 'feeling good', 'heavy meal yesterday')", "")
+        submitted = st.form_submit_button("Save weight")
+
+        if submitted:
+            log_entry = already_logged.copy() if already_logged else {"date": today_str}
+            log_entry["weight"] = w
+            log_entry["date"] = today_str
+            if note:
+                log_entry["note"] = note
+            save_log(name, log_entry)
+
+            # Update profile current weight
+            profiles = st.session_state.profiles
+            for p in profiles:
+                if p["name"] == name:
+                    p["weight"] = w
+            st.session_state.profiles = profiles
+            save_profiles(profiles)
+
+            lost = round(profile["start_weight"] - w, 1)
+            to_go = round(w - profile["target"], 1)
+            st.success(f"Weight saved — {w} stone logged for today.")
+
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Current", f"{w} st")
+            col2.metric("Lost so far", f"{lost} st")
+            col3.metric("To go", f"{to_go} st")
+
+    st.markdown("---")
+    st.markdown("### Weight history")
+    if logs:
+        df = pd.DataFrame(logs)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.sort_values("date", ascending=False)
+        if "weight" in df.columns:
+            st.line_chart(df[["date","weight"]].set_index("date"))
+            st.dataframe(
+                df[["date","weight"] + (["note"] if "note" in df.columns else [])].head(14),
+                use_container_width=True
+            )
+    else:
+        st.info("No weight logs yet. Log your first weight above.")
 
 # ── GYM PLAN ──────────────────────────────────────────────────────────────────
 elif page == "🏋️ Gym Plan":
@@ -544,3 +624,4 @@ elif page == "🍽️ Weekly Meal Plan":
 
     **This one Sunday session saves you cooking every single day.**
     """)
+
