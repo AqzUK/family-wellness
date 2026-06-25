@@ -254,52 +254,88 @@ elif page == "🏋️ Gym Plan":
 
 # ── HUNGRY ────────────────────────────────────────────────────────────────────
 elif page == "🥗 I'm Hungry":
-    from utils.meal_plans import get_meal_suggestion
+    from utils.hungry import get_hungry_fix
+    from datetime import datetime
+
     profile = st.session_state.active_profile
     if not profile:
         st.warning("Please set up your profile first.")
         st.stop()
 
-    st.markdown('<div class="main-title">🥗 What Should I Eat?</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">Halal · Cheap · Fulfilling · Right now</div>', unsafe_allow_html=True)
+    name = profile["name"]
+    now = datetime.now()
+    hour = now.hour + now.minute / 60
 
-    from datetime import datetime
-    hour = datetime.now().hour
-    if hour < 10:
-        meal_time = "breakfast"
-    elif hour < 14:
-        meal_time = "lunch"
-    elif hour < 18:
-        meal_time = "afternoon"
-    elif hour < 21:
-        meal_time = "dinner"
-    else:
-        meal_time = "late"
+    st.markdown("<div class='main-title'>🥗 I'm Hungry</div>", unsafe_allow_html=True)
+    st.markdown('<div class="sub-title">Quick fix between meals · Keeps you on plan</div>', unsafe_allow_html=True)
 
-    st.markdown(f"**Suggested for:** {meal_time.title()}")
+    # Show current time and next meal
+    from utils.hungry import get_next_meal
+    next_meal, hours_until = get_next_meal(hour)
+    h = int(hours_until)
+    m = int((hours_until - h) * 60)
+    time_str = f"{h}h {m}m" if h > 0 else f"{m} minutes"
 
-    meals = get_meal_suggestion(profile, meal_time)
-    for meal in meals:
-        st.markdown(f"""
-        <div class="hungry-card">
-          <div class="hungry-title">{meal['name']}</div>
-          <div class="hungry-item">⏱ {meal['time']} · 💰 Est. {meal['cost']}</div>
-          <div class="hungry-item" style="margin-top:6px"><strong>Ingredients:</strong> {meal['ingredients']}</div>
-          <div class="hungry-item" style="margin-top:4px"><strong>How to make it:</strong> {meal['method']}</div>
-          <div class="hungry-item" style="margin-top:4px; color:#888">~{meal['calories']} kcal · {meal['protein']}g protein</div>
-        </div>
-        """, unsafe_allow_html=True)
+    col1, col2 = st.columns(2)
+    col1.metric("Time now", now.strftime("%H:%M"))
+    col2.metric("Next meal", f"{next_meal.title()} in {time_str}")
 
-    if meal_time == "late":
-        st.error("⛔ It is past 8:30pm. The kitchen is closed. Drink water or herbal tea. Sleep is more important than food right now.")
+    st.markdown("---")
+
+    # Ask home or out
+    st.markdown("### Where are you right now?")
+    location_choice = st.radio(
+        "Location",
+        ["🏠 At home", "🏢 Out and about"],
+        label_visibility="collapsed",
+        horizontal=True
+    )
+    location = "home" if "home" in location_choice else "out"
+
+    if st.button("Tell me what to eat →", type="primary"):
+        result = get_hungry_fix(location, profile)
+        fix = result["fix"]
+
+        st.markdown("---")
+
+        if result["type"] == "closed":
+            st.error(f"⛔ **{fix['name']}**")
+            st.markdown(f"> {fix['method']}")
+            st.caption(fix['why'])
+
+        elif result["type"] == "wait":
+            st.warning(f"⏱ **{fix['name']}**")
+            st.markdown(f"Your next meal ({result['next_meal']}) is only **{time_str}** away.")
+            st.markdown(f"> {fix['method']}")
+            st.caption(fix['why'])
+
+        else:
+            icon = "🏠" if location == "home" else "🏢"
+            st.markdown(f"""
+            <div class="hungry-card">
+              <div class="hungry-title">{icon} {fix['name']}</div>
+              <div class="hungry-item">⏱ {fix['time']} · ~{fix['calories']} kcal · {fix['protein']}g protein</div>
+              <div class="hungry-item" style="margin-top:8px">{fix['method']}</div>
+              <div class="hungry-item" style="margin-top:6px; color:#888"><em>Why this works: {fix['why']}</em></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("---")
+            st.caption(f"Next meal: {result['next_meal'].title()} in {time_str}. Hold on until then.")
 
 # ── SHOPPING LIST ─────────────────────────────────────────────────────────────
 elif page == "🛒 Shopping List":
     from utils.shopping import get_weekly_shopping_list
-    st.markdown('<div class="main-title">🛒 Weekly Aldi Shopping List</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">For the whole family · Est. under £60 · Halal</div>', unsafe_allow_html=True)
+    from datetime import date as date_cls
+    week_number = date_cls.today().isocalendar()[1] % 4
+    week_labels = ["Week A", "Week B", "Week C", "Week D"]
+    week_label = week_labels[week_number]
 
-    shopping = get_weekly_shopping_list()
+    st.markdown('<div class="main-title">🛒 Weekly Aldi Shopping List</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub-title">{week_label} · For the whole family · Est. under £60 · Halal</div>', unsafe_allow_html=True)
+    st.info(f"This is **{week_label}** of your 4-week rotation. The list updates automatically each week to match your meal plan.")
+
+    shopping = get_weekly_shopping_list(week_number)
     total_est = 0
     for category, items in shopping.items():
         st.markdown(f'<div class="aldi-header">{category}</div>', unsafe_allow_html=True)
@@ -370,6 +406,17 @@ elif page == "🍽️ Weekly Meal Plan":
     from utils.meal_plans import (
         BREAKFASTS, LUNCHES, DINNERS, SNACKS, get_calorie_target
     )
+    from datetime import date as date_cls
+
+    # Rotate meals each week so content changes — 4 week cycle
+    week_number = date_cls.today().isocalendar()[1] % 4
+    def rotated(lst, n):
+        n = n % len(lst)
+        return lst[n:] + lst[:n]
+    B = rotated(BREAKFASTS, week_number)
+    L = rotated(LUNCHES, week_number)
+    D = rotated(DINNERS, week_number)
+    S = rotated(SNACKS, week_number)
 
     profile = st.session_state.active_profile
     if not profile:
@@ -391,10 +438,10 @@ elif page == "🍽️ Weekly Meal Plan":
     DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
     for i, day in enumerate(DAYS):
-        breakfast = BREAKFASTS[i % 7]
-        lunch     = LUNCHES[i % 7]
-        dinner    = DINNERS[i % 7]
-        snack     = SNACKS[i % len(SNACKS)]
+        breakfast = B[i % 7]
+        lunch     = L[i % 7]
+        dinner    = D[i % 7]
+        snack     = S[i % len(S)]
 
         with st.expander(f"📅 {day}", expanded=(i == 0)):
 
